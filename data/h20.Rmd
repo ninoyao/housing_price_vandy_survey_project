@@ -1,0 +1,10 @@
+---
+title: "h20"
+output: html_notebook
+---
+
+```{r}
+library(h2o)
+h2o.init()
+```
+

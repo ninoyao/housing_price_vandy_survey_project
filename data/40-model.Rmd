@@ -1,0 +1,104 @@
+---
+title: "40-modeling"
+output: html_notebook
+---
+
+```{r lm}
+## lm
+#In this simple model I want to use linear regression on few selected features
+
+#Read the train file
+tr <- read.csv("train.csv")
+te <- read.csv("test.csv")
+
+#Bath <- pmax(1,tr$FullBath)
+#Bed <- pmin(pmax(1, tr$BedroomAbvGr), 4)
+LogLotArea <- log10(tr$LotArea)
+LogArea <- log10(tr$GrLivArea)
+Age <- pmax(0.0, tr$YrSold - pmax(tr$YearBuilt, tr$YearRemodAdd))
+#New <- as.factor(Age == 0.0)
+Quality <- tr$OverallQual
+Neighborhood <- as.factor(tr$Neighborhood)
+Zoning <- as.factor(tr$MSZoning)
+Style <- as.factor(tr$HouseStyle)
+Condition <- tr$OverallCond
+
+LogPrice <- log10(tr$SalePrice)
+
+simplemodel <- lm(LogPrice ~ LogArea + LogLotArea + Age + Quality + Condition + Neighborhood + Zoning + Style)
+
+
+#Bath <- pmax(1,te$FullBath)
+#Bed <- pmin(pmax(1, te$BedroomAbvGr), 4)
+LogArea <- log10(te$GrLivArea)
+LogLotArea <- log10(te$LotArea)
+Age <- pmax(0.0, te$YrSold - pmax(te$YearBuilt, te$YearRemodAdd))
+#New <- as.factor(Age == 0.0)
+Quality <- te$OverallQual
+Neighborhood <- as.factor(te$Neighborhood)
+Zoning <- as.factor(te$MSZoning)
+Zoning[is.na(Zoning)] <- "RL"
+Subclass <- as.factor(te$MSSubClass)
+Style <- as.factor(te$HouseStyle)
+Condition <- te$OverallCond
+
+fewfeatures <- data.frame(LogArea, LogLotArea, Age, Quality, Condition, Neighborhood, Zoning, Style)
+sapply(1:ncol(fewfeatures), function(i) anyNA(fewfeatures[,i]))
+
+test.LogPrice <- predict(simplemodel, fewfeatures)
+SalePrice <- 10.0**test.LogPrice
+Id <- te$Id
+
+
+
+```
+
+
+```{r gbm}
+## GBM
+# set caret training parameters
+CARET.TRAIN.PARMS <- list(method="gbm")   
+
+CARET.TUNE.GRID <-  expand.grid(n.trees=100, 
+                                interaction.depth=10, 
+                                shrinkage=0.1,
+                                n.minobsinnode=10)
+
+MODEL.SPECIFIC.PARMS <- list(verbose=0) #NULL # Other model specific parameters
+
+# model specific training parameter
+CARET.TRAIN.CTRL <- trainControl(method="none",
+                                 verboseIter=FALSE,
+                                 classProbs=FALSE)
+
+CARET.TRAIN.OTHER.PARMS <- list(trControl=CARET.TRAIN.CTRL,
+                                tuneGrid=CARET.TUNE.GRID,
+                                metric="RMSE")
+
+# generate features for Level 1
+gbm_set <- llply(data_folds,trainOneFold,L0FeatureSet1)
+
+# final model fit
+gbm_mdl <- do.call(train,
+                   c(list(x=L0FeatureSet1$train$predictors,y=L0FeatureSet1$train$y),
+                     CARET.TRAIN.PARMS,
+                     MODEL.SPECIFIC.PARMS,
+                     CARET.TRAIN.OTHER.PARMS))
+
+# CV Error Estimate
+cv_y <- do.call(c,lapply(gbm_set,function(x){x$predictions$y}))
+cv_yhat <- do.call(c,lapply(gbm_set,function(x){x$predictions$yhat}))
+rmse(cv_y,cv_yhat)
+## [1] 0.1309466
+cat("Average CV rmse:",mean(do.call(c,lapply(gbm_set,function(x){x$score}))))
+## Average CV rmse: 0.1304117
+# create test submission.
+# A prediction is made by averaging the predictions made by using the models
+# fitted for each fold.
+
+test_gbm_yhat <- predict(gbm_mdl,newdata = L0FeatureSet1$test$predictors,type = "raw")
+gbm_submission <- cbind(Id=L0FeatureSet1$test$id,SalePrice=exp(test_gbm_yhat))
+write.csv(gbm_submission,file="gbm_sumbission2.csv",row.names=FALSE)
+
+```
+
